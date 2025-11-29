@@ -84,21 +84,41 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         row = page.locator(f"xpath={row_xpath}").first
         row.wait_for(state="visible", timeout=timeout)
 
-        # 2) Find the label inside the row by text
-        label = page.locator(
-            f"xpath={row_xpath}//*[normalize-space()='{row_label}']"
+        # 2) Identify the header section that holds the label (the top row with column headings)
+        header = row.locator(
+            "xpath=.//div[contains(@class,'trans-fields-headings') or contains(@class,'trans-fields-headings-local-time')]"
         ).first
-        label.wait_for(state="visible", timeout=timeout)
+        header.wait_for(state="visible", timeout=timeout)
 
-        # 3) Move to the sibling section that holds the react-select control
-        control = label.locator(
-            "xpath=ancestor::section[1]/following-sibling::section[1]//div[contains(@class,'ocs__control')]"
+        label_section = header.locator(
+            f".//section[.//label[normalize-space()='{row_label}']]"
         ).first
+        label_section.wait_for(state="visible", timeout=timeout)
+
+        # 3) Determine the column index of the label inside the header row
+        column_index = label_section.evaluate(
+            "el => Array.from(el.parentElement.children).indexOf(el)"
+        )
+        if column_index < 0:
+            raise Exception(f"Could not compute column index for label '{row_label}'")
+
+        # 4) Grab the next d-flex row that holds the actual inputs (sections align by position)
+        field_row = header.locator(
+            "xpath=following::div[contains(@class,'d-flex')][1]"
+        ).first
+        field_row.wait_for(state="visible", timeout=timeout)
+
+        target_section = field_row.locator(
+            f".//section[contains(@class,'ocs-field-item')][{column_index + 1}]"
+        ).first
+        target_section.wait_for(state="visible", timeout=timeout)
+
+        control = target_section.locator(".ocs__control").first
         control.wait_for(state="visible", timeout=timeout)
         control.scroll_into_view_if_needed()
         page.wait_for_timeout(150)
 
-        # 4) Open dropdown (double click fallback)
+        # 5) Open dropdown (double click fallback)
         for _ in range(2):
             control.click(force=True)
             page.wait_for_timeout(200)
@@ -108,7 +128,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         else:
             raise Exception(f"Dropdown never opened for label '{row_label}'")
 
-        # 5) Pick the option
+        # 6) Pick the option
         option = page.get_by_role("option", name=value_text)
         option.wait_for(timeout=timeout)
         option.click(force=True)
