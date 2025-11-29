@@ -78,7 +78,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         row.wait_for(state="visible", timeout=timeout)
 
         label = row.locator(
-            f".//*[normalize-space()='{row_label}']"
+            f"xpath=.//*[normalize-space()='{row_label}']"
         ).first
         label.wait_for(state="visible", timeout=timeout)
 
@@ -243,7 +243,7 @@ def fill_text_cell(page, label_text, value):
     row.wait_for(state="visible", timeout=15000)
 
     label = row.locator(
-        f".//*[normalize-space()='{label_text}']"
+        f"xpath=.//*[normalize-space()='{label_text}']"
     ).first
     label.wait_for(state="visible", timeout=10000)
 
