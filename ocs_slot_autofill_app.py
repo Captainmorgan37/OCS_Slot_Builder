@@ -155,7 +155,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         field_row.wait_for(state="visible", timeout=timeout)
 
         target_section = field_row.locator(
-            f"xpath=.//section[contains(@class,'ocs-field-item')][{column_index + 1}]"
+            f"xpath=(.//section[contains(@class,'ocs-field-item')])[{column_index + 1}]"
         ).first
         target_section.wait_for(state="visible", timeout=timeout)
 
@@ -229,11 +229,32 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
             ).first
             label.wait_for(state="visible", timeout=timeout)
 
-            # Prefer the same section, otherwise step to the next field item.
+            # If the label lives in the header, compute its sibling index and
+            # pick the same position in the first input row. This avoids
+            # depending on positional predicates that can drift when markup
+            # shifts or additional columns are inserted.
             section_locator = label.locator(
                 "xpath=ancestor::section[contains(@class,'ocs-field-item')][1]"
-            ).first
-            if section_locator.count() == 0:
+            )
+            if section_locator.count() > 0:
+                try:
+                    section_index = section_locator.evaluate(
+                        "el => Array.from(el.parentElement.children).indexOf(el)"
+                    )
+                except Exception:
+                    section_index = -1
+            else:
+                section_index = -1
+
+            if section_index >= 0:
+                field_row = row.locator(
+                    "xpath=.//div[contains(@class,'d-flex')][1]"
+                ).first
+                section_locator = field_row.locator(
+                    f"xpath=(.//section[contains(@class,'ocs-field-item')])[{section_index + 1}]"
+                ).first
+            else:
+                # Fallback to the next field-item if we cannot compute an index
                 section_locator = label.locator(
                     "xpath=following::section[contains(@class,'ocs-field-item')][1]"
                 ).first
