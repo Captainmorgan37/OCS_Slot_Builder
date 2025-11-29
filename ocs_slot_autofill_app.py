@@ -273,22 +273,32 @@ def fill_text_cell(page, label_text, value):
 
     row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
 
-    row = page.locator(f"xpath={row_xpath}").first
-    row.wait_for(state="visible", timeout=15000)
+    def _locate_label():
+        row = page.locator(f"xpath={row_xpath}").first
+        row.wait_for(state="visible", timeout=15000)
+        return page.locator(
+            f"xpath={row_xpath}//*[normalize-space()='{label_text}']"
+        ).first
 
-    label = page.locator(
-        f"xpath={row_xpath}//*[normalize-space()='{label_text}']"
-    ).first
-    label.wait_for(state="visible", timeout=10000)
+    try:
+        label = _locate_label()
+        label.wait_for(state="visible", timeout=10000)
+    except Exception:
+        # Fallback: search anywhere on the page for the label if the new row
+        # is missing the expected "first-flight" class.
+        label = page.locator(f"//*[normalize-space()='{label_text}']").first
+        label.wait_for(state="visible", timeout=10000)
 
     container = label.locator(
         "xpath=ancestor::section[1]/following-sibling::section[1]"
     )
+    container.scroll_into_view_if_needed()
 
     field = container.locator(
         "xpath=.//input[not(@type='checkbox') and not(@type='radio')]"
     ).first
     field.wait_for(state="visible", timeout=10000)
+    field.scroll_into_view_if_needed()
 
     # 5) Fill the input
     field.fill(str(value))
