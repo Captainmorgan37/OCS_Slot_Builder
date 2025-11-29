@@ -295,13 +295,27 @@ def select_stc(page, value, timeout=8000):
     row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
     row.wait_for(state="visible", timeout=timeout)
 
+    # Prefer the inline section with an STC label; fall back to the service-type
+    # composite control if the inline one isn't present/visible yet.
     stc_section = row.locator(
         "xpath=.//section[.//label[normalize-space()='STC']]"
     ).first
-    stc_section.wait_for(state="visible", timeout=timeout)
 
-    control = stc_section.locator(".ocs__control").first
-    control.wait_for(state="visible", timeout=timeout)
+    control = None
+    try:
+        stc_section.wait_for(state="visible", timeout=timeout)
+        inline_control = stc_section.locator(".ocs__control").first
+        inline_control.wait_for(state="visible", timeout=timeout)
+        control = inline_control
+    except Exception:
+        # Inline control may not be visible on some layouts; use the combined
+        # service-type control instead.
+        fallback_control = row.locator(
+            ".trans-field-w-service-type .ocs__control"
+        ).first
+        fallback_control.wait_for(state="visible", timeout=timeout)
+        control = fallback_control
+
     control.scroll_into_view_if_needed()
 
     for _ in range(2):
