@@ -14,6 +14,21 @@ OCS_ADD_FLIGHTS = "https://online-coordination.com/frontend/#/addFlightsGaba"
 # Cred storage helpers
 # -----------------------------
 CRED_FILE = "ocs_creds.json"
+LOG_FILE = "ocs_autofill_debug.log"
+
+
+def log_debug(msg: str):
+    """Mirror debug output to stdout and append to a local log file."""
+
+    try:
+        print(msg)
+    finally:
+        try:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{msg}\n")
+        except Exception:
+            # Debug logging should never break the flow
+            pass
 
 def load_saved_creds():
     if os.path.exists(CRED_FILE):
@@ -70,31 +85,31 @@ def popup_passphrase_chars(request_text: str):
 def _dump_react_select_debug(section, row_label):
     try:
         html = section.evaluate("el => el.innerHTML")
-        print(f"[DEBUG {row_label}] section HTML:\n{html}\n")
+        log_debug(f"[DEBUG {row_label}] section HTML:\n{html}\n")
     except Exception as e:
-        print(f"[DEBUG {row_label}] Unable to dump HTML: {e}")
+        log_debug(f"[DEBUG {row_label}] Unable to dump HTML: {e}")
 
     try:
         controls = section.locator(".ocs__control").all()
-        print(
+        log_debug(
             f"[DEBUG {row_label}] .ocs__control count: {len(controls)}"
         )
         for idx, ctl in enumerate(controls):
             cls = ctl.evaluate("el => el.className")
-            print(f"  control[{idx}] class: {cls}")
+            log_debug(f"  control[{idx}] class: {cls}")
     except Exception as e:
-        print(f"[DEBUG {row_label}] Control introspection failed: {e}")
+        log_debug(f"[DEBUG {row_label}] Control introspection failed: {e}")
 
     try:
         inputs = section.locator(
             "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
         ).all()
-        print(f"[DEBUG {row_label}] react-select inputs: {len(inputs)}")
+        log_debug(f"[DEBUG {row_label}] react-select inputs: {len(inputs)}")
         for idx, inp in enumerate(inputs):
             rid = inp.get_attribute("id")
-            print(f"  input[{idx}] id: {rid}")
+            log_debug(f"  input[{idx}] id: {rid}")
     except Exception as e:
-        print(f"[DEBUG {row_label}] Input introspection failed: {e}")
+        log_debug(f"[DEBUG {row_label}] Input introspection failed: {e}")
 
 
 def select_row_react_select(page, row_label, value_text, timeout=6000):
@@ -168,7 +183,9 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
             page.wait_for_timeout(200)
 
         if not control.is_visible():
-            print(f"[DEBUG {row_label}] control still hidden before wait_for")
+            log_debug(
+                f"[DEBUG {row_label}] control still hidden before wait_for – writing {LOG_FILE}"
+            )
             _dump_react_select_debug(target_section, row_label)
         control.wait_for(state="visible", timeout=timeout)
 
@@ -191,7 +208,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         return True
 
     except Exception as e:
-        print(f"[ERROR selecting '{value_text}' in row '{row_label}']: {e}")
+        log_debug(f"[ERROR selecting '{value_text}' in row '{row_label}']: {e}")
         if target_section is not None:
             try:
                 _dump_react_select_debug(target_section, row_label)
@@ -544,6 +561,13 @@ def run_ocs_autofill(slot: dict, creds: dict):
             slot["seats"] = "9"
         elif ac_type in ("C25A", "C25B"):
             slot["seats"] = "7"
+
+    # reset debug log per run so the latest dump is easy to spot
+    try:
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("OCS autofill debug log\n")
+    except Exception:
+        pass
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
