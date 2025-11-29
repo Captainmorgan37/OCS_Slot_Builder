@@ -91,7 +91,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         header.wait_for(state="visible", timeout=timeout)
 
         label_section = header.locator(
-            f".//section[.//label[normalize-space()='{row_label}']]"
+            f"xpath=.//section[.//label[normalize-space()='{row_label}']]"
         ).first
         label_section.wait_for(state="visible", timeout=timeout)
 
@@ -109,7 +109,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         field_row.wait_for(state="visible", timeout=timeout)
 
         target_section = field_row.locator(
-            f".//section[contains(@class,'ocs-field-item')][{column_index + 1}]"
+            f"xpath=.//section[contains(@class,'ocs-field-item')][{column_index + 1}]"
         ).first
         target_section.wait_for(state="visible", timeout=timeout)
 
