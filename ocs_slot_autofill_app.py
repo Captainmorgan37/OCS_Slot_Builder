@@ -315,6 +315,8 @@ def fill_text_cell(page, label_text, value):
         "Seats": "#numSeats",
         "A/C Type": "#aircraftType",
         "Time": "#clearedTimeDep",
+        "Dest": "#destinationStation",
+        "Orig": "#originStation",
     }
 
     direct_selector = selector_map.get(label_text)
