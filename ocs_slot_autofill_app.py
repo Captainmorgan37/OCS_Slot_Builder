@@ -77,6 +77,42 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
     inspector reported.
     """
 
+    # Known react-select inputs that expose stable IDs (STC, ParkLoc). Use these
+    # first to avoid brittle positional lookups, then fall back to the label-based
+    # path below.
+    react_input_map = {
+        "STC": "#react-select-8-input",
+        "ParkLoc": "#react-select-17-input",
+    }
+
+    explicit_input = react_input_map.get(row_label)
+    if explicit_input:
+        try:
+            control = page.locator(explicit_input).locator(
+                "xpath=ancestor::div[contains(@class,'ocs__control')][1]"
+            )
+            control.wait_for(state="visible", timeout=timeout)
+            control.scroll_into_view_if_needed()
+
+            for _ in range(2):
+                control.click(force=True)
+                page.wait_for_timeout(200)
+                menu = page.locator(".ocs__menu")
+                if menu.is_visible():
+                    break
+            else:
+                raise Exception(f"Dropdown for {row_label} did not open via ID")
+
+            option = page.get_by_role("option", name=value_text)
+            option.wait_for(timeout=timeout)
+            option.click()
+            page.wait_for_timeout(150)
+            return True
+        except Exception as e:
+            print(
+                f"Direct react-select targeting failed for {row_label}; falling back: {e}"
+            )
+
     try:
         row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
 
@@ -270,6 +306,26 @@ def fill_text_cell(page, label_text, value):
     error). This keeps adjacent input targeting reliable even when nested markup
     or whitespace varies.
     """
+
+    # Prefer stable IDs/`name` attributes when the markup provides them; fall back
+    # to the positional label-based lookup if anything goes wrong.
+    selector_map = {
+        "A/C Reg": "#aircraftRegistration",
+        "Date": "input[name='startDate']",
+        "Seats": "#numSeats",
+        "A/C Type": "#aircraftType",
+        "Time": "#clearedTimeDep",
+    }
+
+    direct_selector = selector_map.get(label_text)
+    if direct_selector:
+        try:
+            fill_field_by_selector(page, direct_selector, value, timeout=12000)
+            return
+        except Exception as e:
+            print(
+                f"Direct selector failed for {label_text} ({direct_selector}); falling back: {e}"
+            )
 
     row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
 
