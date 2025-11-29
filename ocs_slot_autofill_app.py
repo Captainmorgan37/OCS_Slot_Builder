@@ -289,6 +289,66 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
             return False
 
 
+def select_stc(page, value, timeout=8000):
+    """Select the STC dropdown within the first flight row by targeting its own section."""
+
+    row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+    row.wait_for(state="visible", timeout=timeout)
+
+    stc_section = row.locator(
+        "xpath=.//section[.//label[normalize-space()='STC']]"
+    ).first
+    stc_section.wait_for(state="visible", timeout=timeout)
+
+    control = stc_section.locator(".ocs__control").first
+    control.wait_for(state="visible", timeout=timeout)
+    control.scroll_into_view_if_needed()
+
+    for _ in range(2):
+        control.click(force=True)
+        page.wait_for_timeout(200)
+        menu = page.locator(".ocs__menu")
+        if menu.is_visible():
+            break
+    else:
+        raise Exception("STC dropdown did not open")
+
+    option = page.get_by_role("option", name=value)
+    option.wait_for(timeout=timeout)
+    option.click()
+    page.wait_for_timeout(150)
+
+
+def select_parkloc(page, value, timeout=8000):
+    """Select the ParkLoc dropdown by locating its inline section instead of header alignment."""
+
+    row = page.locator(".ocs-transaction-flight-fields.first-flight").first
+    row.wait_for(state="visible", timeout=timeout)
+
+    park_section = row.locator(
+        "xpath=.//section[.//label[normalize-space()='ParkLoc']]"
+    ).first
+    park_section.wait_for(state="visible", timeout=timeout)
+
+    control = park_section.locator(".ocs__control").first
+    control.wait_for(state="visible", timeout=timeout)
+    control.scroll_into_view_if_needed()
+
+    for _ in range(2):
+        control.click(force=True)
+        page.wait_for_timeout(200)
+        menu = page.locator(".ocs__menu")
+        if menu.is_visible():
+            break
+    else:
+        raise Exception("ParkLoc dropdown did not open")
+
+    option = page.get_by_role("option", name=value)
+    option.wait_for(timeout=timeout)
+    option.click()
+    page.wait_for_timeout(150)
+
+
 
 
 
@@ -529,7 +589,7 @@ def fill_slot_form(page, slot, operation, parkloc):
             else:
                 fill_text_cell(page, "Orig", slot["other_airport"])
 
-    select_row_react_select(page, "STC", "D")
+    select_stc(page, "D")
 
     if slot.get("airport") == "CYYZ":
         try:
@@ -539,7 +599,7 @@ def fill_slot_form(page, slot, operation, parkloc):
             page.wait_for_timeout(150)
             page.get_by_role("option", name="D General Aviation").click()
         except Exception:
-            select_row_react_select(page, "ParkLoc", parkloc)
+            select_parkloc(page, parkloc)
 
 
     return True
@@ -851,11 +911,11 @@ def run_ocs_autofill(slot: dict, creds: dict):
                 fill_text_cell(page, "Orig", slot["other_airport"])
 
         # STC dropdown
-        select_row_react_select(page, "STC", "D")
+        select_stc(page, "D")
 
         # ParkLoc dropdown only applies to CYYZ slots
         if slot.get("airport") == "CYYZ":
-            select_row_react_select(page, "ParkLoc", parkloc)
+            select_parkloc(page, parkloc)
 
 
 
