@@ -107,9 +107,10 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
     inspector reported.
     """
 
-    try:
-        row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
+    row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
+    target_section = None
 
+    try:
         # 1) Grab the first row container explicitly via XPath to avoid selector mixing
         row = page.locator(f"xpath={row_xpath}").first
         row.wait_for(state="visible", timeout=timeout)
@@ -167,6 +168,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
             page.wait_for_timeout(200)
 
         if not control.is_visible():
+            print(f"[DEBUG {row_label}] control still hidden before wait_for")
             _dump_react_select_debug(target_section, row_label)
         control.wait_for(state="visible", timeout=timeout)
 
@@ -190,6 +192,11 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
 
     except Exception as e:
         print(f"[ERROR selecting '{value_text}' in row '{row_label}']: {e}")
+        if target_section is not None:
+            try:
+                _dump_react_select_debug(target_section, row_label)
+            except Exception:
+                pass
         return False
 
 
