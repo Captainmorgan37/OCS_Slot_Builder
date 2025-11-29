@@ -155,7 +155,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         field_row.wait_for(state="visible", timeout=timeout)
 
         target_section = field_row.locator(
-            f"xpath=.//section[contains(@class,'ocs-field-item')][{column_index + 1}]"
+            f"xpath=(.//section[contains(@class,'ocs-field-item')])[{column_index + 1}]"
         ).first
         target_section.wait_for(state="visible", timeout=timeout)
 
@@ -214,7 +214,79 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
                 _dump_react_select_debug(target_section, row_label)
             except Exception:
                 pass
-        return False
+
+        # Fallback: locate the label anywhere inside the first-flight row and
+        # pick the nearest react-select control (useful when the header/column
+        # alignment shifts or STC renders slightly differently).
+        try:
+            row = page.locator(
+                "div.ocs-transaction-flight-fields.first-flight"
+            ).first
+            row.wait_for(state="visible", timeout=timeout)
+
+            label = row.locator(
+                f"xpath=.//*[normalize-space()='{row_label}']"
+            ).first
+            label.wait_for(state="visible", timeout=timeout)
+
+            # If the label lives in the header, compute its sibling index and
+            # pick the same position in the first input row. This avoids
+            # depending on positional predicates that can drift when markup
+            # shifts or additional columns are inserted.
+            section_locator = label.locator(
+                "xpath=ancestor::section[contains(@class,'ocs-field-item')][1]"
+            )
+            if section_locator.count() > 0:
+                try:
+                    section_index = section_locator.evaluate(
+                        "el => Array.from(el.parentElement.children).indexOf(el)"
+                    )
+                except Exception:
+                    section_index = -1
+            else:
+                section_index = -1
+
+            if section_index >= 0:
+                field_row = row.locator(
+                    "xpath=.//div[contains(@class,'d-flex')][1]"
+                ).first
+                section_locator = field_row.locator(
+                    f"xpath=(.//section[contains(@class,'ocs-field-item')])[{section_index + 1}]"
+                ).first
+            else:
+                # Fallback to the next field-item if we cannot compute an index
+                section_locator = label.locator(
+                    "xpath=following::section[contains(@class,'ocs-field-item')][1]"
+                ).first
+
+            control = section_locator.locator(
+                "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+            ).first
+            if control.count() == 0:
+                control = section_locator.locator(".ocs__control").first
+
+            control.wait_for(state="visible", timeout=timeout)
+            control.scroll_into_view_if_needed()
+
+            for _ in range(2):
+                control.click(force=True)
+                page.wait_for_timeout(200)
+                menu = page.locator(".ocs__menu")
+                if menu.is_visible():
+                    break
+            else:
+                raise Exception(f"Fallback dropdown never opened for '{row_label}'")
+
+            option = page.get_by_role("option", name=value_text)
+            option.wait_for(timeout=timeout)
+            option.click(force=True)
+            page.wait_for_timeout(150)
+            return True
+        except Exception as fallback_error:
+            log_debug(
+                f"[FALLBACK ERROR selecting '{value_text}' in row '{row_label}']: {fallback_error}"
+            )
+            return False
 
 
 
