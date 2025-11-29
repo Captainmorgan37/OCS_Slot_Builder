@@ -71,24 +71,34 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
     """
     Select a react-select dropdown within the first editable flight row that sits
     immediately after a label containing ``row_label`` (e.g., 'A/P', 'STC').
+
+    This uses explicit XPath selectors (not chained CSS) so Playwright never tries
+    to interpret the XPath as CSS, avoiding the "Unexpected token '/'" failure the
+    inspector reported.
     """
 
     try:
-        row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+        row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
+
+        # 1) Grab the first row container explicitly via XPath to avoid selector mixing
+        row = page.locator(f"xpath={row_xpath}").first
         row.wait_for(state="visible", timeout=timeout)
 
-        label = row.locator(
-            f"xpath=.//*[normalize-space()='{row_label}']"
+        # 2) Find the label inside the row by text
+        label = page.locator(
+            f"xpath={row_xpath}//*[normalize-space()='{row_label}']"
         ).first
         label.wait_for(state="visible", timeout=timeout)
 
+        # 3) Move to the sibling section that holds the react-select control
         control = label.locator(
-            "xpath=ancestor::section[1]/following-sibling::section[1]"
-        ).locator(".ocs__control").first
+            "xpath=ancestor::section[1]/following-sibling::section[1]//div[contains(@class,'ocs__control')]"
+        ).first
         control.wait_for(state="visible", timeout=timeout)
         control.scroll_into_view_if_needed()
         page.wait_for_timeout(150)
 
+        # 4) Open dropdown (double click fallback)
         for _ in range(2):
             control.click(force=True)
             page.wait_for_timeout(200)
@@ -98,6 +108,7 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         else:
             raise Exception(f"Dropdown never opened for label '{row_label}'")
 
+        # 5) Pick the option
         option = page.get_by_role("option", name=value_text)
         option.wait_for(timeout=timeout)
         option.click(force=True)
@@ -234,16 +245,19 @@ def select_dropdown_value(page, label_text, value_text, timeout=5000):
 def fill_text_cell(page, label_text, value):
     """Fill a text field that sits immediately to the right of ``label_text``.
 
-    We scope to the first editable flight row to avoid header controls and use a
-    flexible label match so nested markup or whitespace changes do not prevent
-    targeting.
+    We scope to the first editable flight row using explicit XPath selectors to
+    avoid CSS parsing of the XPath snippet (which previously threw an inspector
+    error). This keeps adjacent input targeting reliable even when nested markup
+    or whitespace varies.
     """
 
-    row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+    row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
+
+    row = page.locator(f"xpath={row_xpath}").first
     row.wait_for(state="visible", timeout=15000)
 
-    label = row.locator(
-        f"xpath=.//*[normalize-space()='{label_text}']"
+    label = page.locator(
+        f"xpath={row_xpath}//*[normalize-space()='{label_text}']"
     ).first
     label.wait_for(state="visible", timeout=10000)
 
@@ -252,7 +266,7 @@ def fill_text_cell(page, label_text, value):
     )
 
     field = container.locator(
-        ".//input[not(@type='checkbox') and not(@type='radio')]"
+        "xpath=.//input[not(@type='checkbox') and not(@type='radio')]"
     ).first
     field.wait_for(state="visible", timeout=10000)
 
