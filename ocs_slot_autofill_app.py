@@ -69,24 +69,26 @@ def popup_passphrase_chars(request_text: str):
 
 def select_row_react_select(page, row_label, value_text, timeout=6000):
     """
-    Select a react-select dropdown that is positioned immediately AFTER
-    a label containing row_label (e.g., 'A/P', 'STC', 'ParkLoc').
+    Select a react-select dropdown within the first editable flight row that sits
+    immediately after a label containing ``row_label`` (e.g., 'A/P', 'STC').
     """
 
     try:
-        # Find the label text element
-        label = page.get_by_text(row_label, exact=True)
-        label.wait_for(timeout=timeout)
+        row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+        row.wait_for(state="visible", timeout=timeout)
 
-        # The dropdown control is the FIRST react-select control after the label
+        label = row.locator(
+            f".//*[normalize-space()='{row_label}']"
+        ).first
+        label.wait_for(state="visible", timeout=timeout)
+
         control = label.locator(
-            "xpath=following::div[contains(@class,'ocs__control')][1]"
-        )
-        control.wait_for(timeout=timeout)
+            "xpath=ancestor::section[1]/following-sibling::section[1]"
+        ).locator(".ocs__control").first
+        control.wait_for(state="visible", timeout=timeout)
         control.scroll_into_view_if_needed()
         page.wait_for_timeout(150)
 
-        # Double-click logic for React-Select
         for _ in range(2):
             control.click(force=True)
             page.wait_for_timeout(200)
@@ -96,7 +98,6 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         else:
             raise Exception(f"Dropdown never opened for label '{row_label}'")
 
-        # Select option
         option = page.get_by_role("option", name=value_text)
         option.wait_for(timeout=timeout)
         option.click(force=True)
@@ -233,30 +234,23 @@ def select_dropdown_value(page, label_text, value_text, timeout=5000):
 def fill_text_cell(page, label_text, value):
     """Fill a text field that sits immediately to the right of ``label_text``.
 
-    We scope the search to the first editable flight row to avoid accidentally
-    hitting header controls such as the "Show Required Fields Only" toggle
-    (which is a checkbox and cannot be filled).
+    We scope to the first editable flight row to avoid header controls and use a
+    flexible label match so nested markup or whitespace changes do not prevent
+    targeting.
     """
 
-    # 1) Scope to the editable slot row (not the header) and wait for it
     row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
     row.wait_for(state="visible", timeout=15000)
 
-    # 2) Locate the label text within this row using an XPath so we don't miss
-    #    nested elements or whitespace differences
-    label_xpath = (
-        f".//p[normalize-space()='{label_text}']"
-    )
-    label = row.locator(label_xpath).first
+    label = row.locator(
+        f".//*[normalize-space()='{label_text}']"
+    ).first
     label.wait_for(state="visible", timeout=10000)
 
-    # 3) Move to the next <section> containing the input (same structure as
-    #    other fields such as Date/Time)
     container = label.locator(
         "xpath=ancestor::section[1]/following-sibling::section[1]"
     )
 
-    # 4) Target only text-like inputs to avoid toggles/checkboxes
     field = container.locator(
         ".//input[not(@type='checkbox') and not(@type='radio')]"
     ).first
@@ -266,39 +260,71 @@ def fill_text_cell(page, label_text, value):
     field.fill(str(value))
 
 
+def fill_field_by_selector(page, selector: str, value, timeout=10000):
+    """Wait for a specific input selector and fill it."""
+
+    field = page.locator(selector)
+    field.wait_for(state="visible", timeout=timeout)
+    field.fill(str(value))
+
+
 def fill_slot_form(page, slot, operation, parkloc):
     """Fill the entire slot form using react-select + text inputs."""
 
-    # 1. A/P (react-select index 0)
+    row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+    row.wait_for(state="visible", timeout=15000)
+
     if slot.get("airport"):
-        if not select_react_select(page, 0, slot["airport"]):
-            raise Exception("Failed selecting A/P")
+        control = row.locator(".ocs__control").first
+        control.wait_for(state="visible", timeout=8000)
+        control.scroll_into_view_if_needed()
 
-    # 2. A/C Reg
-    if slot.get("acreg"):
-        fill_text_cell(page, "A/C Reg", slot["acreg"])
-
-    # 3. Date
-    if slot.get("date"):
-        fill_text_cell(page, "Date", slot["date"])
-
-    # 4. Time
-    if slot.get("time"):
-        fill_text_cell(page, "Time", slot["time"])
-
-    # 5. Orig/Dest (depends on operation)
-    if slot.get("other_airport"):
-        if operation == "departure":
-            fill_text_cell(page, "Dest", slot["other_airport"])
+        for _ in range(2):
+            control.click(force=True)
+            page.wait_for_timeout(200)
+            menu = page.locator(".ocs__menu")
+            if menu.is_visible():
+                break
         else:
-            fill_text_cell(page, "Orig", slot["other_airport"])
+            raise Exception("A/P dropdown did not open")
 
-    # 6. STC (react-select index 1)
+        option = page.get_by_role("option", name=slot["airport"])
+        option.wait_for(timeout=8000)
+        option.click()
+        page.wait_for_timeout(200)
+
+    if slot.get("acreg"):
+        fill_field_by_selector(page, "#aircraftRegistration", slot["acreg"], timeout=8000)
+
+    if slot.get("date"):
+        fill_field_by_selector(page, "input[name='startDate']", slot["date"], timeout=8000)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+
+    if slot.get("time"):
+        fill_field_by_selector(page, "#clearedTimeDep", slot["time"], timeout=8000)
+
+    if slot.get("other_airport"):
+        dest_selector = "#destinationStation" if operation == "departure" else "#originStation"
+        try:
+            fill_field_by_selector(page, dest_selector, slot["other_airport"], timeout=8000)
+        except Exception:
+            # fallback to label-based lookup if the direct selector isn't present
+            if operation == "departure":
+                fill_text_cell(page, "Dest", slot["other_airport"])
+            else:
+                fill_text_cell(page, "Orig", slot["other_airport"])
+
     select_row_react_select(page, "STC", "D")
 
-
-    # 7. ParkLoc (react-select index 2)
-    select_row_react_select(page, "ParkLoc", parkloc)
+    try:
+        svc_control = row.locator(".trans-field-w-service-type .ocs__control").first
+        svc_control.wait_for(state="visible", timeout=8000)
+        svc_control.click(force=True)
+        page.wait_for_timeout(150)
+        page.get_by_role("option", name="D General Aviation").click()
+    except Exception:
+        select_row_react_select(page, "ParkLoc", parkloc)
 
 
     return True
