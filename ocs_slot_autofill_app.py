@@ -166,6 +166,29 @@ def open_react_select(page, index):
         page.wait_for_timeout(150)
 
 
+def select_react_select(page, index, value_text, timeout=6000):
+    """Open a react-select control by index and pick the desired option."""
+
+    control = page.locator(".ocs__control").nth(index)
+    control.wait_for(timeout=timeout)
+    control.scroll_into_view_if_needed()
+
+    # Open the dropdown (double click as a fallback)
+    for _ in range(2):
+        control.click(force=True)
+        page.wait_for_timeout(200)
+        menu = page.locator(".ocs__menu")
+        if menu.is_visible():
+            break
+    else:
+        raise Exception(f"Dropdown at index {index} did not open")
+
+    option = page.get_by_role("option", name=value_text)
+    option.wait_for(timeout=timeout)
+    option.click()
+
+    page.wait_for_timeout(150)
+
 
 def select_dropdown_value(page, label_text, value_text, timeout=5000):
     """
@@ -208,6 +231,13 @@ def select_dropdown_value(page, label_text, value_text, timeout=5000):
 
 
 def fill_text_cell(page, label_text, value):
+    """Fill a text field that sits immediately to the right of ``label_text``.
+
+    We scope the search to the first editable flight row to avoid accidentally
+    hitting header controls such as the "Show Required Fields Only" toggle
+    (which is a checkbox and cannot be filled).
+    """
+
     # Scope to the editable slot row (not the header)
     row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
 
@@ -217,8 +247,8 @@ def fill_text_cell(page, label_text, value):
     # Move to the next <section> containing the input
     container = label.locator("xpath=ancestor::section[1]/following-sibling::section[1]")
 
-    # Find the actual input
-    field = container.locator("input").first
+    # Target only text-like inputs to avoid toggles/checkboxes
+    field = container.locator("input:not([type='checkbox']):not([type='radio'])").first
 
     # Fill the input
     field.fill(str(value))
@@ -301,18 +331,6 @@ def click_add_slot_button(page, operation):
 
     # 4) Click it
     btn.click()
-
-def fill_text_cell(page, label_text, value):
-    # Find the label text (e.g. "Date", "Time", "Dest", "Orig", "Seats")
-    label = page.get_by_text(label_text, exact=True)
-
-    # Move to the next <section> — that section contains the input
-    container = label.locator("xpath=ancestor::section[1]/following-sibling::section[1]")
-
-    # The actual input lives inside that container
-    field = container.locator("input").first
-
-    field.fill(value)
 
 def select_dropdown_by_label(page, label_text, option_text):
     # Scope to the editable row, not the header
