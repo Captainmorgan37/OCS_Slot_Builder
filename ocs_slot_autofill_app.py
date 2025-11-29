@@ -14,6 +14,21 @@ OCS_ADD_FLIGHTS = "https://online-coordination.com/frontend/#/addFlightsGaba"
 # Cred storage helpers
 # -----------------------------
 CRED_FILE = "ocs_creds.json"
+LOG_FILE = "ocs_autofill_debug.log"
+
+
+def log_debug(msg: str):
+    """Mirror debug output to stdout and append to a local log file."""
+
+    try:
+        print(msg)
+    finally:
+        try:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(f"{msg}\n")
+        except Exception:
+            # Debug logging should never break the flow
+            pass
 
 def load_saved_creds():
     if os.path.exists(CRED_FILE):
@@ -67,6 +82,36 @@ def popup_passphrase_chars(request_text: str):
         return values["c1"], values["c2"]
     return None, None
 
+def _dump_react_select_debug(section, row_label):
+    try:
+        html = section.evaluate("el => el.innerHTML")
+        log_debug(f"[DEBUG {row_label}] section HTML:\n{html}\n")
+    except Exception as e:
+        log_debug(f"[DEBUG {row_label}] Unable to dump HTML: {e}")
+
+    try:
+        controls = section.locator(".ocs__control").all()
+        log_debug(
+            f"[DEBUG {row_label}] .ocs__control count: {len(controls)}"
+        )
+        for idx, ctl in enumerate(controls):
+            cls = ctl.evaluate("el => el.className")
+            log_debug(f"  control[{idx}] class: {cls}")
+    except Exception as e:
+        log_debug(f"[DEBUG {row_label}] Control introspection failed: {e}")
+
+    try:
+        inputs = section.locator(
+            "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+        ).all()
+        log_debug(f"[DEBUG {row_label}] react-select inputs: {len(inputs)}")
+        for idx, inp in enumerate(inputs):
+            rid = inp.get_attribute("id")
+            log_debug(f"  input[{idx}] id: {rid}")
+    except Exception as e:
+        log_debug(f"[DEBUG {row_label}] Input introspection failed: {e}")
+
+
 def select_row_react_select(page, row_label, value_text, timeout=6000):
     """
     Select a react-select dropdown within the first editable flight row that sits
@@ -77,45 +122,10 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
     inspector reported.
     """
 
-    # Known react-select inputs that expose stable IDs (STC, ParkLoc). Use these
-    # first to avoid brittle positional lookups, then fall back to the label-based
-    # path below.
-    react_input_map = {
-        "STC": "#react-select-8-input",
-        "ParkLoc": "#react-select-17-input",
-    }
-
-    explicit_input = react_input_map.get(row_label)
-    if explicit_input:
-        try:
-            control = page.locator(explicit_input).locator(
-                "xpath=ancestor::div[contains(@class,'ocs__control')][1]"
-            )
-            control.wait_for(state="visible", timeout=timeout)
-            control.scroll_into_view_if_needed()
-
-            for _ in range(2):
-                control.click(force=True)
-                page.wait_for_timeout(200)
-                menu = page.locator(".ocs__menu")
-                if menu.is_visible():
-                    break
-            else:
-                raise Exception(f"Dropdown for {row_label} did not open via ID")
-
-            option = page.get_by_role("option", name=value_text)
-            option.wait_for(timeout=timeout)
-            option.click()
-            page.wait_for_timeout(150)
-            return True
-        except Exception as e:
-            print(
-                f"Direct react-select targeting failed for {row_label}; falling back: {e}"
-            )
+    row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
+    target_section = None
 
     try:
-        row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
-
         # 1) Grab the first row container explicitly via XPath to avoid selector mixing
         row = page.locator(f"xpath={row_xpath}").first
         row.wait_for(state="visible", timeout=timeout)
@@ -149,10 +159,35 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         ).first
         target_section.wait_for(state="visible", timeout=timeout)
 
-        control = target_section.locator(".ocs__control").first
-        control.wait_for(state="visible", timeout=timeout)
-        control.scroll_into_view_if_needed()
+        # Prefer an explicit react-select input if present (IDs tend to change
+        # across deployments), then fall back to the generic control wrapper.
+        control = target_section.locator(
+            "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+        ).first
+
+        if control.count() == 0:
+            control = target_section.locator(".ocs__control").first
+
+        # Even when the control is present, the library sometimes holds it in a
+        # collapsed/hidden state until a click happens on the parent section.
+        # Avoid waiting on visibility until after we've nudged the container.
+        control.wait_for(state="attached", timeout=timeout)
+        target_section.scroll_into_view_if_needed()
+        target_section.click(force=True)
         page.wait_for_timeout(150)
+
+        # If we still don't see a visible control, try clicking the control
+        # itself before enforcing visibility to coax React-Select to render.
+        if not control.is_visible():
+            control.click(force=True)
+            page.wait_for_timeout(200)
+
+        if not control.is_visible():
+            log_debug(
+                f"[DEBUG {row_label}] control still hidden before wait_for – writing {LOG_FILE}"
+            )
+            _dump_react_select_debug(target_section, row_label)
+        control.wait_for(state="visible", timeout=timeout)
 
         # 5) Open dropdown (double click fallback)
         for _ in range(2):
@@ -173,7 +208,12 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         return True
 
     except Exception as e:
-        print(f"[ERROR selecting '{value_text}' in row '{row_label}']: {e}")
+        log_debug(f"[ERROR selecting '{value_text}' in row '{row_label}']: {e}")
+        if target_section is not None:
+            try:
+                _dump_react_select_debug(target_section, row_label)
+            except Exception:
+                pass
         return False
 
 
@@ -419,14 +459,15 @@ def fill_slot_form(page, slot, operation, parkloc):
 
     select_row_react_select(page, "STC", "D")
 
-    try:
-        svc_control = row.locator(".trans-field-w-service-type .ocs__control").first
-        svc_control.wait_for(state="visible", timeout=8000)
-        svc_control.click(force=True)
-        page.wait_for_timeout(150)
-        page.get_by_role("option", name="D General Aviation").click()
-    except Exception:
-        select_row_react_select(page, "ParkLoc", parkloc)
+    if slot.get("airport") == "CYYZ":
+        try:
+            svc_control = row.locator(".trans-field-w-service-type .ocs__control").first
+            svc_control.wait_for(state="visible", timeout=8000)
+            svc_control.click(force=True)
+            page.wait_for_timeout(150)
+            page.get_by_role("option", name="D General Aviation").click()
+        except Exception:
+            select_row_react_select(page, "ParkLoc", parkloc)
 
 
     return True
@@ -520,6 +561,13 @@ def run_ocs_autofill(slot: dict, creds: dict):
             slot["seats"] = "9"
         elif ac_type in ("C25A", "C25B"):
             slot["seats"] = "7"
+
+    # reset debug log per run so the latest dump is easy to spot
+    try:
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("OCS autofill debug log\n")
+    except Exception:
+        pass
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
@@ -733,8 +781,9 @@ def run_ocs_autofill(slot: dict, creds: dict):
         # STC dropdown
         select_row_react_select(page, "STC", "D")
 
-        # ParkLoc dropdown
-        select_row_react_select(page, "ParkLoc", parkloc)
+        # ParkLoc dropdown only applies to CYYZ slots
+        if slot.get("airport") == "CYYZ":
+            select_row_react_select(page, "ParkLoc", parkloc)
 
 
 
