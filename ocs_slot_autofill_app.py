@@ -214,7 +214,58 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
                 _dump_react_select_debug(target_section, row_label)
             except Exception:
                 pass
-        return False
+
+        # Fallback: locate the label anywhere inside the first-flight row and
+        # pick the nearest react-select control (useful when the header/column
+        # alignment shifts or STC renders slightly differently).
+        try:
+            row = page.locator(
+                "div.ocs-transaction-flight-fields.first-flight"
+            ).first
+            row.wait_for(state="visible", timeout=timeout)
+
+            label = row.locator(
+                f"xpath=.//*[normalize-space()='{row_label}']"
+            ).first
+            label.wait_for(state="visible", timeout=timeout)
+
+            # Prefer the same section, otherwise step to the next field item.
+            section_locator = label.locator(
+                "xpath=ancestor::section[contains(@class,'ocs-field-item')][1]"
+            ).first
+            if section_locator.count() == 0:
+                section_locator = label.locator(
+                    "xpath=following::section[contains(@class,'ocs-field-item')][1]"
+                ).first
+
+            control = section_locator.locator(
+                "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+            ).first
+            if control.count() == 0:
+                control = section_locator.locator(".ocs__control").first
+
+            control.wait_for(state="visible", timeout=timeout)
+            control.scroll_into_view_if_needed()
+
+            for _ in range(2):
+                control.click(force=True)
+                page.wait_for_timeout(200)
+                menu = page.locator(".ocs__menu")
+                if menu.is_visible():
+                    break
+            else:
+                raise Exception(f"Fallback dropdown never opened for '{row_label}'")
+
+            option = page.get_by_role("option", name=value_text)
+            option.wait_for(timeout=timeout)
+            option.click(force=True)
+            page.wait_for_timeout(150)
+            return True
+        except Exception as fallback_error:
+            log_debug(
+                f"[FALLBACK ERROR selecting '{value_text}' in row '{row_label}']: {fallback_error}"
+            )
+            return False
 
 
 
