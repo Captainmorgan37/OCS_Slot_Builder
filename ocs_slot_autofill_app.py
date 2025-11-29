@@ -344,9 +344,24 @@ def select_parkloc(page, value, timeout=8000):
     ).first
     park_section.wait_for(state="visible", timeout=timeout)
 
-    control = park_section.locator(".ocs__control").first
+    control = park_section.locator(
+        "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+    ).first
+    if control.count() == 0:
+        control = park_section.locator(".ocs__control").first
+
+    control.wait_for(state="attached", timeout=timeout)
+    park_section.scroll_into_view_if_needed()
+    park_section.click(force=True)
+    page.wait_for_timeout(150)
+
+    if not control.is_visible():
+        control.click(force=True)
+        page.wait_for_timeout(200)
+
+    if not control.is_visible():
+        _dump_react_select_debug(park_section, "ParkLoc")
     control.wait_for(state="visible", timeout=timeout)
-    control.scroll_into_view_if_needed()
 
     for _ in range(2):
         control.click(force=True)
