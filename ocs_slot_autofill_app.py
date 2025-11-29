@@ -238,19 +238,31 @@ def fill_text_cell(page, label_text, value):
     (which is a checkbox and cannot be filled).
     """
 
-    # Scope to the editable slot row (not the header)
+    # 1) Scope to the editable slot row (not the header) and wait for it
     row = page.locator("div.ocs-transaction-flight-fields.first-flight").first
+    row.wait_for(state="visible", timeout=15000)
 
-    # Find the correct label inside this row only
-    label = row.get_by_text(label_text, exact=True)
+    # 2) Locate the label text within this row using an XPath so we don't miss
+    #    nested elements or whitespace differences
+    label_xpath = (
+        f".//p[normalize-space()='{label_text}']"
+    )
+    label = row.locator(label_xpath).first
+    label.wait_for(state="visible", timeout=10000)
 
-    # Move to the next <section> containing the input
-    container = label.locator("xpath=ancestor::section[1]/following-sibling::section[1]")
+    # 3) Move to the next <section> containing the input (same structure as
+    #    other fields such as Date/Time)
+    container = label.locator(
+        "xpath=ancestor::section[1]/following-sibling::section[1]"
+    )
 
-    # Target only text-like inputs to avoid toggles/checkboxes
-    field = container.locator("input:not([type='checkbox']):not([type='radio'])").first
+    # 4) Target only text-like inputs to avoid toggles/checkboxes
+    field = container.locator(
+        ".//input[not(@type='checkbox') and not(@type='radio')]"
+    ).first
+    field.wait_for(state="visible", timeout=10000)
 
-    # Fill the input
+    # 5) Fill the input
     field.fill(str(value))
 
 
