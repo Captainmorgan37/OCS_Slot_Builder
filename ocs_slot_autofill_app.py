@@ -453,6 +453,16 @@ def run_ocs_autofill(slot: dict, creds: dict):
     operation = slot.get("operation", "departure").lower()
     parkloc = slot.get("parkloc") or "SKYCHARTER"
 
+    # Default aircraft details so the seat and type fields are always populated.
+    ac_type = slot.get("ac_type") or "E545"
+    slot["ac_type"] = ac_type
+
+    if not slot.get("seats"):
+        if ac_type == "E545":
+            slot["seats"] = "9"
+        elif ac_type in ("C25A", "C25B"):
+            slot["seats"] = "7"
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         context = browser.new_context(ignore_https_errors=True)
