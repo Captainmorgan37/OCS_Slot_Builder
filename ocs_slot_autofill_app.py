@@ -67,6 +67,36 @@ def popup_passphrase_chars(request_text: str):
         return values["c1"], values["c2"]
     return None, None
 
+def _dump_react_select_debug(section, row_label):
+    try:
+        html = section.evaluate("el => el.innerHTML")
+        print(f"[DEBUG {row_label}] section HTML:\n{html}\n")
+    except Exception as e:
+        print(f"[DEBUG {row_label}] Unable to dump HTML: {e}")
+
+    try:
+        controls = section.locator(".ocs__control").all()
+        print(
+            f"[DEBUG {row_label}] .ocs__control count: {len(controls)}"
+        )
+        for idx, ctl in enumerate(controls):
+            cls = ctl.evaluate("el => el.className")
+            print(f"  control[{idx}] class: {cls}")
+    except Exception as e:
+        print(f"[DEBUG {row_label}] Control introspection failed: {e}")
+
+    try:
+        inputs = section.locator(
+            "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
+        ).all()
+        print(f"[DEBUG {row_label}] react-select inputs: {len(inputs)}")
+        for idx, inp in enumerate(inputs):
+            rid = inp.get_attribute("id")
+            print(f"  input[{idx}] id: {rid}")
+    except Exception as e:
+        print(f"[DEBUG {row_label}] Input introspection failed: {e}")
+
+
 def select_row_react_select(page, row_label, value_text, timeout=6000):
     """
     Select a react-select dropdown within the first editable flight row that sits
@@ -122,18 +152,22 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         if control.count() == 0:
             control = target_section.locator(".ocs__control").first
 
+        # Even when the control is present, the library sometimes holds it in a
+        # collapsed/hidden state until a click happens on the parent section.
+        # Avoid waiting on visibility until after we've nudged the container.
         control.wait_for(state="attached", timeout=timeout)
+        target_section.scroll_into_view_if_needed()
         target_section.click(force=True)
-        control.scroll_into_view_if_needed()
-
-        # The react-select wrapper occasionally renders but remains invisible
-        # until it receives focus. Nudge it once before enforcing the visible
-        # wait to avoid false timeouts.
         page.wait_for_timeout(150)
+
+        # If we still don't see a visible control, try clicking the control
+        # itself before enforcing visibility to coax React-Select to render.
         if not control.is_visible():
             control.click(force=True)
-            page.wait_for_timeout(150)
+            page.wait_for_timeout(200)
 
+        if not control.is_visible():
+            _dump_react_select_debug(target_section, row_label)
         control.wait_for(state="visible", timeout=timeout)
 
         # 5) Open dropdown (double click fallback)
