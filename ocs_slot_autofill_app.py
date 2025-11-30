@@ -882,10 +882,6 @@ class OCSAutomationSession:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)  # give Angular some time
 
-        # DEBUG PAUSE: inspect Chromium BEFORE submenu clicks
-        print("Pausing for manual inspection BEFORE navigating to Add Flights")
-        page.pause()
-
         try:
             page.get_by_role("link", name="GA/BA Flights").click(timeout=3000)
         except Exception:
@@ -905,12 +901,14 @@ class OCSAutomationSession:
         if not self.page:
             raise RuntimeError("Session is not active")
 
-        # If we're not on the add flights page anymore, hop back via direct URL.
+        # If we're not on the Add Flights page anymore, navigate via the UI
+        # instead of hitting the route directly (direct deep links can 404
+        # when the session hasn't initialized routing state).
         try:
             if not self.page.get_by_text("Add Flights").is_visible():
-                self.page.goto(OCS_ADD_FLIGHTS, wait_until="networkidle")
+                self._nav_to_add_flights()
         except Exception:
-            self.page.goto(OCS_ADD_FLIGHTS, wait_until="networkidle")
+            self._nav_to_add_flights()
 
         self.page.wait_for_selector("//p[normalize-space()='Departure']", timeout=20000)
         self.page.wait_for_selector("//p[normalize-space()='Arrival']", timeout=20000)
