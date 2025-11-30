@@ -1,7 +1,8 @@
 import json
 import os
 import re
-import PySimpleGUI as sg
+import tkinter as tk
+from tkinter import messagebox, scrolledtext, simpledialog, ttk
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 
 # -----------------------------
@@ -68,19 +69,13 @@ def popup_passphrase_chars(request_text: str):
     """
     Old helper (no longer used) kept for reference.
     """
-    layout = [
-        [sg.Text("OCS needs 2 passphrase characters.")],
-        [sg.Text(request_text, text_color="yellow")],
-        [sg.Text("Character #1:"), sg.Input(key="c1", size=(5,1))],
-        [sg.Text("Character #2:"), sg.Input(key="c2", size=(5,1))],
-        [sg.Button("Continue"), sg.Button("Cancel")]
-    ]
-    win = sg.Window("OCS Passphrase", layout, modal=True)
-    event, values = win.read()
-    win.close()
-    if event == "Continue":
-        return values["c1"], values["c2"]
-    return None, None
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("OCS Passphrase", "OCS needs 2 passphrase characters.\n" + request_text)
+    c1 = simpledialog.askstring("Passphrase", "Character #1:", parent=root)
+    c2 = simpledialog.askstring("Passphrase", "Character #2:", parent=root)
+    root.destroy()
+    return c1, c2
 
 def _dump_react_select_debug(section, row_label):
     try:
@@ -852,9 +847,12 @@ def run_ocs_autofill(slot: dict, creds: dict):
 
             phrase = creds.get("passphrase", "") or ""
             if len(phrase) < max(idx1, idx2):
-                sg.popup_error(
-                    f"Stored passphrase is too short for positions {idx1} and {idx2}.\n"
-                    f"Length is {len(phrase)}. Please update it in the app."
+                messagebox.showerror(
+                    "OCS Slot Autofill",
+                    (
+                        f"Stored passphrase is too short for positions {idx1} and {idx2}.\n"
+                        f"Length is {len(phrase)}. Please update it in the app."
+                    ),
                 )
                 browser.close()
                 return
@@ -927,7 +925,10 @@ def run_ocs_autofill(slot: dict, creds: dict):
         if slot.get("airport"):
             ok = select_row_react_select(page, "A/P", slot["airport"])
             if not ok:
-                sg.popup_error("Couldn't select A/P dropdown. We'll need to tweak selector.")
+                messagebox.showerror(
+                    "OCS Slot Autofill",
+                    "Couldn't select A/P dropdown. We'll need to tweak selector.",
+                )
                 page.pause()
 
 
@@ -971,115 +972,129 @@ def run_ocs_autofill(slot: dict, creds: dict):
         send_clicked = click_send_all(page)
 
         if send_clicked:
-            sg.popup(
-                "Send All clicked automatically. Review the confirmation page in the browser."
+            messagebox.showinfo(
+                "OCS Slot Autofill",
+                "Send All clicked automatically. Review the confirmation page in the browser.",
             )
         else:
-            sg.popup_error(
-                "Couldn't click Send All automatically. Please click it manually in the browser."
+            messagebox.showerror(
+                "OCS Slot Autofill",
+                "Couldn't click Send All automatically. Please click it manually in the browser.",
             )
 
         page.pause()
         browser.close()
 
 def main():
-    sg.theme("SystemDefault")  # now safe with the updated PySimpleGUI install
+    root = tk.Tk()
+    root.title("OCS Slot Autofill v1.1")
 
     saved_creds = load_saved_creds()
 
-    layout = [
-        [sg.Text("OCS Slot Autofill Tool (FEAS-ready)", font=("Segoe UI", 14, "bold"))],
+    operation_var = tk.StringVar(value="departure")
 
-        [sg.Frame("Optional: paste FEAS JSON here",
-                  [[sg.Multiline(size=(80,6), key="feas_json")],
-                   [sg.Button("Parse FEAS JSON")]])],
+    def parse_feas():
+        data = parse_feas_json(feas_text.get("1.0", tk.END).strip())
+        if not data:
+            messagebox.showerror("OCS Slot Autofill", "Invalid JSON.")
+            return
 
-        [sg.Frame("Operation Type",
-                  [[sg.Radio("Departure", "op", default=True, key="op_dep"),
-                    sg.Radio("Arrival", "op", default=False, key="op_arr")]])],
+        op = (data.get("operation") or data.get("type") or "departure").lower()
+        operation_var.set("arrival" if op == "arrival" else "departure")
 
-        [sg.Frame("Slot Details (manual or FEAS-filled)",
-                  [
-                      [sg.Text("A/P (Airport):"), sg.Input(key="airport", size=(8,1)),
-                       sg.Text("A/C Reg:"), sg.Input(key="acreg", size=(12,1))],
-                      [sg.Text("Date:"), sg.Input(key="date", size=(10,1)),
-                       sg.Text("Time (UTC):"), sg.Input(key="time", size=(6,1))],
-                      [sg.Text("Dest/Orig airport:"), sg.Input(key="other_airport", size=(10,1)),
-                       sg.Text("ParkLoc:"), sg.Input(key="parkloc", size=(14,1))]
-                  ])],
+        airport_var.set(data.get("airport", ""))
+        acreg_var.set(data.get("acreg", "") or data.get("tail", ""))
+        date_var.set(data.get("date", ""))
+        time_var.set(data.get("time", ""))
+        other_airport_var.set(
+            data.get("other_airport", "")
+            or data.get("dest", "")
+            or data.get("orig", "")
+        )
+        parkloc_var.set(data.get("parkloc", "SKYCHARTER"))
 
-        [sg.Frame("OCS Credentials",
-                  [
-                      [sg.Text("Username:"),
-                       sg.Input(key="username", size=(20,1),
-                                default_text=saved_creds.get("username", ""))],
-                      [sg.Text("Password:"),
-                       sg.Input(key="password", password_char="*",
-                                size=(20,1),
-                                default_text=saved_creds.get("password", ""))],
-                      [sg.Text("Passphrase:"),
-                       sg.Input(key="passphrase", password_char="*",
-                                size=(20,1),
-                                default_text=saved_creds.get("passphrase", ""))]
-                  ])],
+    def launch_autofill():
+        operation = operation_var.get()
+        slot = {
+            "operation": operation,
+            "airport": airport_var.get().strip(),
+            "acreg": acreg_var.get().strip(),
+            "date": date_var.get().strip(),
+            "time": time_var.get().strip(),
+            "other_airport": other_airport_var.get().strip(),
+            "parkloc": parkloc_var.get().strip() or "SKYCHARTER",
+        }
+        creds = {
+            "username": username_var.get().strip(),
+            "password": password_var.get(),
+            "passphrase": passphrase_var.get(),
+        }
 
-        [sg.Button("Launch Autofill", button_color=("white", "#0B84F3")),
-         sg.Button("Exit")]
-    ]
+        if not creds["username"] or not creds["password"]:
+            messagebox.showerror("OCS Slot Autofill", "Enter OCS credentials.")
+            return
 
-    window = sg.Window("OCS Slot Autofill v1.1", layout)
+        save_creds(creds["username"], creds["password"], creds["passphrase"])
+        run_ocs_autofill(slot, creds)
 
-    while True:
-        event, values = window.read()
-        if event in (sg.WINDOW_CLOSED, "Exit"):
-            break
+    ttk.Label(root, text="OCS Slot Autofill Tool (FEAS-ready)", font=("Segoe UI", 14, "bold")).pack(pady=(10, 5))
 
-        if event == "Parse FEAS JSON":
-            data = parse_feas_json(values["feas_json"])
-            if not data:
-                sg.popup_error("Invalid JSON.")
-                continue
+    feas_frame = ttk.LabelFrame(root, text="Optional: paste FEAS JSON here")
+    feas_frame.pack(fill="x", padx=10, pady=5)
+    feas_text = scrolledtext.ScrolledText(feas_frame, width=80, height=6)
+    feas_text.pack(fill="both", expand=True, padx=5, pady=5)
+    ttk.Button(feas_frame, text="Parse FEAS JSON", command=parse_feas).pack(padx=5, pady=(0, 5), anchor="e")
 
-            op = (data.get("operation") or data.get("type") or "departure").lower()
-            window["op_dep"].update(value=(op == "departure"))
-            window["op_arr"].update(value=(op == "arrival"))
+    op_frame = ttk.LabelFrame(root, text="Operation Type")
+    op_frame.pack(fill="x", padx=10, pady=5)
+    ttk.Radiobutton(op_frame, text="Departure", variable=operation_var, value="departure").pack(side="left", padx=5, pady=5)
+    ttk.Radiobutton(op_frame, text="Arrival", variable=operation_var, value="arrival").pack(side="left", padx=5, pady=5)
 
-            window["airport"].update(data.get("airport",""))
-            window["acreg"].update(data.get("acreg","") or data.get("tail",""))
-            window["date"].update(data.get("date",""))
-            window["time"].update(data.get("time",""))
-            window["other_airport"].update(
-                data.get("other_airport","") or data.get("dest","") or data.get("orig","")
-            )
-            window["parkloc"].update(data.get("parkloc","SKYCHARTER"))
+    slot_frame = ttk.LabelFrame(root, text="Slot Details (manual or FEAS-filled)")
+    slot_frame.pack(fill="x", padx=10, pady=5)
 
-        if event == "Launch Autofill":
-            operation = "arrival" if values["op_arr"] else "departure"
+    airport_var = tk.StringVar()
+    acreg_var = tk.StringVar()
+    date_var = tk.StringVar()
+    time_var = tk.StringVar()
+    other_airport_var = tk.StringVar()
+    parkloc_var = tk.StringVar(value="SKYCHARTER")
 
-            slot = {
-                "operation": operation,
-                "airport": values["airport"].strip(),
-                "acreg": values["acreg"].strip(),
-                "date": values["date"].strip(),
-                "time": values["time"].strip(),
-                "other_airport": values["other_airport"].strip(),
-                "parkloc": values["parkloc"].strip() or "SKYCHARTER",
-            }
-            creds = {
-                "username": values["username"].strip(),
-                "password": values["password"],
-                "passphrase": values["passphrase"],
-            }
-            if not creds["username"] or not creds["password"]:
-                sg.popup_error("Enter OCS credentials.")
-                continue
+    ttk.Label(slot_frame, text="A/P (Airport):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=airport_var, width=10).grid(row=0, column=1, sticky="w", padx=5, pady=2)
+    ttk.Label(slot_frame, text="A/C Reg:").grid(row=0, column=2, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=acreg_var, width=16).grid(row=0, column=3, sticky="w", padx=5, pady=2)
 
-            # Save creds so they auto-populate next time
-            save_creds(creds["username"], creds["password"], creds["passphrase"])
+    ttk.Label(slot_frame, text="Date:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=date_var, width=12).grid(row=1, column=1, sticky="w", padx=5, pady=2)
+    ttk.Label(slot_frame, text="Time (UTC):").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=time_var, width=10).grid(row=1, column=3, sticky="w", padx=5, pady=2)
 
-            run_ocs_autofill(slot, creds)
+    ttk.Label(slot_frame, text="Dest/Orig airport:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=other_airport_var, width=14).grid(row=2, column=1, sticky="w", padx=5, pady=2)
+    ttk.Label(slot_frame, text="ParkLoc:").grid(row=2, column=2, sticky="w", padx=5, pady=2)
+    ttk.Entry(slot_frame, textvariable=parkloc_var, width=16).grid(row=2, column=3, sticky="w", padx=5, pady=2)
 
-    window.close()
+    creds_frame = ttk.LabelFrame(root, text="OCS Credentials")
+    creds_frame.pack(fill="x", padx=10, pady=5)
+
+    username_var = tk.StringVar(value=saved_creds.get("username", ""))
+    password_var = tk.StringVar(value=saved_creds.get("password", ""))
+    passphrase_var = tk.StringVar(value=saved_creds.get("passphrase", ""))
+
+    ttk.Label(creds_frame, text="Username:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(creds_frame, textvariable=username_var, width=24).grid(row=0, column=1, sticky="w", padx=5, pady=2)
+    ttk.Label(creds_frame, text="Password:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(creds_frame, textvariable=password_var, width=24, show="*").grid(row=1, column=1, sticky="w", padx=5, pady=2)
+    ttk.Label(creds_frame, text="Passphrase:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
+    ttk.Entry(creds_frame, textvariable=passphrase_var, width=24, show="*").grid(row=2, column=1, sticky="w", padx=5, pady=2)
+
+    btn_frame = ttk.Frame(root)
+    btn_frame.pack(fill="x", padx=10, pady=10)
+    ttk.Button(btn_frame, text="Launch Autofill", command=launch_autofill).pack(side="left", padx=5)
+    ttk.Button(btn_frame, text="Exit", command=root.destroy).pack(side="left", padx=5)
+
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
