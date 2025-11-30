@@ -733,6 +733,11 @@ def run_ocs_autofill(slot: dict, creds: dict):
     ac_type = slot.get("ac_type") or "E545"
     slot["ac_type"] = ac_type
 
+    # Default tail registrations when the user leaves A/C Reg blank.
+    default_regs = {"E545": "CGASL", "C25A": "CFASP", "C25B": "CFASY"}
+    if not slot.get("acreg") and ac_type in default_regs:
+        slot["acreg"] = default_regs[ac_type]
+
     if not slot.get("seats"):
         if ac_type == "E545":
             slot["seats"] = "9"
