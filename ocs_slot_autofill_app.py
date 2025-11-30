@@ -992,6 +992,13 @@ def main():
     saved_creds = load_saved_creds()
 
     operation_var = tk.StringVar(value="departure")
+    airport_var = tk.StringVar()
+    acreg_var = tk.StringVar()
+    date_var = tk.StringVar()
+    time_var = tk.StringVar()
+    other_airport_var = tk.StringVar()
+    parkloc_var = tk.StringVar(value="SKYCHARTER")
+    ac_type_var = tk.StringVar(value="E545")
 
     def parse_feas():
         data = parse_feas_json(feas_text.get("1.0", tk.END).strip())
@@ -1012,6 +1019,7 @@ def main():
             or data.get("orig", "")
         )
         parkloc_var.set(data.get("parkloc", "SKYCHARTER"))
+        ac_type_var.set(data.get("ac_type", "") or data.get("aircraft_type", ""))
 
     def launch_autofill():
         operation = operation_var.get()
@@ -1023,6 +1031,7 @@ def main():
             "time": time_var.get().strip(),
             "other_airport": other_airport_var.get().strip(),
             "parkloc": parkloc_var.get().strip() or "SKYCHARTER",
+            "ac_type": ac_type_var.get().strip(),
         }
         creds = {
             "username": username_var.get().strip(),
@@ -1053,27 +1062,35 @@ def main():
     slot_frame = ttk.LabelFrame(root, text="Slot Details (manual or FEAS-filled)")
     slot_frame.pack(fill="x", padx=10, pady=5)
 
-    airport_var = tk.StringVar()
-    acreg_var = tk.StringVar()
-    date_var = tk.StringVar()
-    time_var = tk.StringVar()
-    other_airport_var = tk.StringVar()
-    parkloc_var = tk.StringVar(value="SKYCHARTER")
-
     ttk.Label(slot_frame, text="A/P (Airport):").grid(row=0, column=0, sticky="w", padx=5, pady=2)
-    ttk.Entry(slot_frame, textvariable=airport_var, width=10).grid(row=0, column=1, sticky="w", padx=5, pady=2)
+    ttk.Combobox(
+        slot_frame,
+        textvariable=airport_var,
+        values=["CYYZ", "CYUL", "CYVR", "CYYC"],
+        width=8,
+        state="readonly",
+    ).grid(row=0, column=1, sticky="w", padx=5, pady=2)
     ttk.Label(slot_frame, text="A/C Reg:").grid(row=0, column=2, sticky="w", padx=5, pady=2)
     ttk.Entry(slot_frame, textvariable=acreg_var, width=16).grid(row=0, column=3, sticky="w", padx=5, pady=2)
 
     ttk.Label(slot_frame, text="Date:").grid(row=1, column=0, sticky="w", padx=5, pady=2)
     ttk.Entry(slot_frame, textvariable=date_var, width=12).grid(row=1, column=1, sticky="w", padx=5, pady=2)
-    ttk.Label(slot_frame, text="Time (UTC):").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+    ttk.Label(slot_frame, text="Time (Local):").grid(row=1, column=2, sticky="w", padx=5, pady=2)
     ttk.Entry(slot_frame, textvariable=time_var, width=10).grid(row=1, column=3, sticky="w", padx=5, pady=2)
 
     ttk.Label(slot_frame, text="Dest/Orig airport:").grid(row=2, column=0, sticky="w", padx=5, pady=2)
     ttk.Entry(slot_frame, textvariable=other_airport_var, width=14).grid(row=2, column=1, sticky="w", padx=5, pady=2)
     ttk.Label(slot_frame, text="ParkLoc:").grid(row=2, column=2, sticky="w", padx=5, pady=2)
     ttk.Entry(slot_frame, textvariable=parkloc_var, width=16).grid(row=2, column=3, sticky="w", padx=5, pady=2)
+
+    ttk.Label(slot_frame, text="A/C Type:").grid(row=3, column=0, sticky="w", padx=5, pady=2)
+    ttk.Combobox(
+        slot_frame,
+        textvariable=ac_type_var,
+        values=["E545", "C25A", "C25B"],
+        width=8,
+        state="readonly",
+    ).grid(row=3, column=1, sticky="w", padx=5, pady=2)
 
     creds_frame = ttk.LabelFrame(root, text="OCS Credentials")
     creds_frame.pack(fill="x", padx=10, pady=5)
