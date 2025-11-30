@@ -517,20 +517,30 @@ def fill_text_cell(page, label_text, value):
         "Date": "input[name='startDate']",
         "Seats": "#numSeats",
         "A/C Type": "#aircraftType",
-        "Time": "#clearedTimeDep",
+        # Arrival uses clearedTimeArr while departure uses clearedTimeDep.
+        "Time": ["#clearedTimeDep", "#clearedTimeArr"],
         "Dest": "#destinationStation",
         "Orig": "#originStation",
     }
 
     direct_selector = selector_map.get(label_text)
     if direct_selector:
-        try:
-            fill_field_by_selector(page, direct_selector, value, timeout=12000)
-            return
-        except Exception as e:
-            print(
-                f"Direct selector failed for {label_text} ({direct_selector}); falling back: {e}"
-            )
+        direct_selectors = (
+            direct_selector if isinstance(direct_selector, (list, tuple)) else [direct_selector]
+        )
+        last_error = None
+
+        for selector in direct_selectors:
+            try:
+                fill_field_by_selector(page, selector, value, timeout=12000)
+                return
+            except Exception as e:
+                last_error = e
+                continue
+
+        print(
+            f"Direct selector failed for {label_text} ({direct_selectors}); falling back: {last_error}"
+        )
 
     row_xpath = "//div[contains(@class,'ocs-transaction-flight-fields') and contains(@class,'first-flight')]"
 
@@ -607,7 +617,16 @@ def fill_slot_form(page, slot, operation, parkloc):
         page.wait_for_timeout(150)
 
     if slot.get("time"):
-        fill_field_by_selector(page, "#clearedTimeDep", slot["time"], timeout=8000)
+        time_selectors = ["#clearedTimeDep", "#clearedTimeArr"]
+        last_error = None
+        for selector in time_selectors:
+            try:
+                fill_field_by_selector(page, selector, slot["time"], timeout=8000)
+                break
+            except Exception as e:
+                last_error = e
+        else:
+            raise last_error if last_error else Exception("No time input found")
 
     if slot.get("other_airport"):
         dest_selector = "#destinationStation" if operation == "departure" else "#originStation"
