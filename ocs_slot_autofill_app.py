@@ -334,52 +334,38 @@ def select_stc(page, value, timeout=8000):
 
 
 def select_parkloc(page, value, timeout=8000):
-    """Select the ParkLoc dropdown by locating its inline section instead of header alignment."""
+    """Select ParkLoc as the LAST react-select dropdown in the first-flight row."""
 
     row = page.locator(".ocs-transaction-flight-fields.first-flight").first
     row.wait_for(state="visible", timeout=timeout)
 
-    park_section = row.locator(
-        "xpath=.//section[.//label[normalize-space()='ParkLoc']]"
-    ).first
-    park_section.wait_for(state="visible", timeout=timeout)
+    # Grab ALL react-select controls in the row
+    controls = row.locator(".ocs__control")
+    count = controls.count()
 
-    control = park_section.locator(
-        "xpath=.//input[contains(@id,'react-select') and contains(@id,'-input')]"
-    ).first
-    if control.count() == 0:
-        control = park_section.locator(".ocs__control").first
+    if count == 0:
+        raise Exception("No react-select controls found in first-flight row")
 
-    control.wait_for(state="attached", timeout=timeout)
-    park_section.scroll_into_view_if_needed()
-    park_section.click(force=True)
-    page.wait_for_timeout(150)
-
-    if not control.is_visible():
-        control.click(force=True)
-        page.wait_for_timeout(200)
-
-    if not control.is_visible():
-        _dump_react_select_debug(park_section, "ParkLoc")
+    # ParkLoc = last dropdown (STC is second-last)
+    control = controls.nth(count - 1)
     control.wait_for(state="visible", timeout=timeout)
+    control.scroll_into_view_if_needed()
 
+    # Open dropdown reliably
     for _ in range(2):
         control.click(force=True)
         page.wait_for_timeout(200)
-        menu = page.locator(".ocs__menu")
-        if menu.is_visible():
+        if page.locator(".ocs__menu").is_visible():
             break
     else:
         raise Exception("ParkLoc dropdown did not open")
 
+    # Select the requested option
     option = page.get_by_role("option", name=value)
     option.wait_for(timeout=timeout)
     option.click()
+
     page.wait_for_timeout(150)
-
-
-
-
 
 
 def select_ap_dropdown(page, airport_code):
@@ -1055,3 +1041,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
