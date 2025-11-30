@@ -715,46 +715,38 @@ def select_dropdown_by_label(page, label_text, option_text):
 
 
 
-def run_ocs_autofill(slot: dict, creds: dict):
-    """
-    slot keys (manual or FEAS):
-      operation: 'departure' | 'arrival'
-      airport: CYYZ/CYYC/CYUL/CYVR
-      acreg: CFASY / tail
-      date: 27NOV or 2025-11-27 (OCS accepts both in practice)
-      time: 0800 (UTC)
-      other_airport: KTEB (Dest for departure, Orig for arrival)
-      parkloc: defaults to SKYCHARTER
-    """
-    operation = slot.get("operation", "departure").lower()
-    parkloc = slot.get("parkloc") or "SKYCHARTER"
+class OCSAutomationSession:
+    def __init__(self):
+        self._pw = None
+        self.browser = None
+        self.context = None
+        self.page = None
 
-    # Default aircraft details so the seat and type fields are always populated.
-    ac_type = slot.get("ac_type") or "E545"
-    slot["ac_type"] = ac_type
+    @property
+    def is_active(self):
+        return self.page is not None
 
-    # Default tail registrations when the user leaves A/C Reg blank.
-    default_regs = {"E545": "CGASL", "C25A": "CFASP", "C25B": "CFASY"}
-    if not slot.get("acreg") and ac_type in default_regs:
-        slot["acreg"] = default_regs[ac_type]
+    def _reset_debug_log(self):
+        try:
+            with open(LOG_FILE, "w", encoding="utf-8") as f:
+                f.write("OCS autofill debug log\n")
+        except Exception:
+            pass
 
-    if not slot.get("seats"):
-        if ac_type == "E545":
-            slot["seats"] = "9"
-        elif ac_type in ("C25A", "C25B"):
-            slot["seats"] = "7"
+    def start(self, creds: dict):
+        if self.page:
+            return
 
-    # reset debug log per run so the latest dump is easy to spot
-    try:
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write("OCS autofill debug log\n")
-    except Exception:
-        pass
+        self._pw = sync_playwright().start()
+        self.browser = self._pw.chromium.launch(headless=False)
+        self.context = self.browser.new_context(ignore_https_errors=True)
+        self.page = self.context.new_page()
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(ignore_https_errors=True)
-        page = context.new_page()
+        self._login(creds)
+        self._nav_to_add_flights()
+
+    def _login(self, creds: dict):
+        page = self.page
 
         # ---------------- LOGIN STEP A ----------------
         # Load base URL and wait for initialization scripts
@@ -839,9 +831,16 @@ def run_ocs_autofill(slot: dict, creds: dict):
 
             word1, word2 = match.groups()
             ordinal_map = {
-                "first": 1, "second": 2, "third": 3, "fourth": 4,
-                "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
-                "ninth": 9, "tenth": 10
+                "first": 1,
+                "second": 2,
+                "third": 3,
+                "fourth": 4,
+                "fifth": 5,
+                "sixth": 6,
+                "seventh": 7,
+                "eighth": 8,
+                "ninth": 9,
+                "tenth": 10,
             }
 
             if word1.lower() not in ordinal_map or word2.lower() not in ordinal_map:
@@ -859,7 +858,7 @@ def run_ocs_autofill(slot: dict, creds: dict):
                         f"Length is {len(phrase)}. Please update it in the app."
                     ),
                 )
-                browser.close()
+                self.close()
                 return
 
             char1 = phrase[idx1 - 1]
@@ -877,42 +876,75 @@ def run_ocs_autofill(slot: dict, creds: dict):
 
         page.wait_for_load_state("networkidle")
 
+    def _nav_to_add_flights(self):
+        page = self.page
         # ---------------- NAV TO ADD FLIGHTS (UI-driven) ----------------
-        # Wait for dashboard to fully load after login
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)  # give Angular some time
 
-        # DEBUG PAUSE: inspect Chromium BEFORE submenu clicks
-        print("Pausing for manual inspection BEFORE navigating to Add Flights")
-        page.pause()
-        # ---------------------------------------------------------------
-
-        # Click "GA/BA Flights" in the top menu
-        # Attempt 1: Standard ARIA locator
         try:
             page.get_by_role("link", name="GA/BA Flights").click(timeout=3000)
-        except:
-            # Fallback: simple text-based click (works reliably on OCS)
+        except Exception:
             print("[INFO] Falling back to text locator for GA/BA Flights...")
             page.get_by_text("GA/BA Flights").click()
 
-
-        # Wait for submenu items to appear
         page.wait_for_selector("text=Add Flights", timeout=8000)
-
-        # Click the "Add Flights" submenu
         page.click("text=Add Flights")
 
-        # ---------------- Ensure Add Flights page is fully ready ----------------
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)  # allow Angular to finish animations
-
         page.wait_for_selector("//p[normalize-space()='Departure']", timeout=20000)
         page.wait_for_selector("//p[normalize-space()='Arrival']", timeout=20000)
-
         page.wait_for_timeout(1000)
 
-        # ---------------- ADD SLOT ROW ----------------
+    def ensure_add_flights_page(self):
+        if not self.page:
+            raise RuntimeError("Session is not active")
+
+        # If we're not on the Add Flights page anymore, navigate via the UI
+        # instead of hitting the route directly (direct deep links can 404
+        # when the session hasn't initialized routing state).
+        try:
+            if not self.page.get_by_text("Add Flights").is_visible():
+                self._nav_to_add_flights()
+        except Exception:
+            self._nav_to_add_flights()
+
+        self.page.wait_for_selector("//p[normalize-space()='Departure']", timeout=20000)
+        self.page.wait_for_selector("//p[normalize-space()='Arrival']", timeout=20000)
+        self.page.wait_for_timeout(500)
+
+    def _apply_slot_defaults(self, slot: dict):
+        operation = slot.get("operation", "departure").lower()
+        parkloc = slot.get("parkloc") or "SKYCHARTER"
+
+        # Default aircraft details so the seat and type fields are always populated.
+        ac_type = slot.get("ac_type") or "E545"
+        slot["ac_type"] = ac_type
+
+        # Default tail registrations when the user leaves A/C Reg blank.
+        default_regs = {"E545": "CGASL", "C25A": "CFASP", "C25B": "CFASY"}
+        if not slot.get("acreg") and ac_type in default_regs:
+            slot["acreg"] = default_regs[ac_type]
+
+        if not slot.get("seats"):
+            if ac_type == "E545":
+                slot["seats"] = "9"
+            elif ac_type in ("C25A", "C25B"):
+                slot["seats"] = "7"
+
+        return operation, parkloc
+
+    def book_slot(self, slot: dict):
+        if not self.page:
+            raise RuntimeError("Session has not been started. Call start() first.")
+
+        self._reset_debug_log()
+        operation, parkloc = self._apply_slot_defaults(slot)
+        page = self.page
+
+        self.ensure_add_flights_page()
+
         if operation == "departure":
             opkey = "dep-reg"
         elif operation == "arrival":
@@ -923,10 +955,6 @@ def run_ocs_autofill(slot: dict, creds: dict):
         click_add_slot_button(page, opkey)
         page.wait_for_timeout(800)
 
-
-        # ---------------- FILL REQUIRED FIELDS ----------------
-
-        # A/P dropdown (react-select)
         if slot.get("airport"):
             ok = select_row_react_select(page, "A/P", slot["airport"])
             if not ok:
@@ -936,44 +964,34 @@ def run_ocs_autofill(slot: dict, creds: dict):
                 )
                 page.pause()
 
-
-        # 2) A/C Reg
         if slot.get("acreg"):
             fill_text_cell(page, "A/C Reg", slot["acreg"])
 
-        # 3) Date
         if slot.get("date"):
             fill_text_cell(page, "Date", slot["date"])
-            page.keyboard.press("Escape")   # Close any date pop-up
+            page.keyboard.press("Escape")
             page.wait_for_timeout(150)
 
-        # 4) Seats (optional but available)
         if slot.get("seats"):
             fill_text_cell(page, "Seats", slot["seats"])
 
-        # 5) A/C Type (optional but available)
         if slot.get("ac_type"):
             fill_text_cell(page, "A/C Type", slot["ac_type"])
 
-        # 6) Time  (clearedTimeDep or clearedTimeArr handled automatically via label)
         if slot.get("time"):
             fill_text_cell(page, "Time", slot["time"])
 
-        # 7) Dest or Orig depending on operation
         if slot.get("other_airport"):
             if operation == "departure":
                 fill_text_cell(page, "Dest", slot["other_airport"])
             else:
                 fill_text_cell(page, "Orig", slot["other_airport"])
 
-        # STC dropdown
         select_stc(page, "D")
 
-        # ParkLoc dropdown only applies to CYYZ slots
         if slot.get("airport") == "CYYZ":
             select_parkloc(page, parkloc)
 
-        # ---------------- SEND ALL ----------------
         send_clicked = click_send_all(page)
 
         if send_clicked:
@@ -988,11 +1006,48 @@ def run_ocs_autofill(slot: dict, creds: dict):
             )
 
         page.pause()
-        browser.close()
+
+    def close(self):
+        try:
+            if self.context:
+                self.context.close()
+            if self.browser:
+                self.browser.close()
+            if self._pw:
+                self._pw.stop()
+        finally:
+            self.page = None
+            self.context = None
+            self.browser = None
+            self._pw = None
+
+
+def run_ocs_autofill(slot: dict, creds: dict, session: OCSAutomationSession | None = None):
+    """
+    slot keys (manual or FEAS):
+      operation: 'departure' | 'arrival'
+      airport: CYYZ/CYYC/CYUL/CYVR
+      acreg: CFASY / tail
+      date: 27NOV or 2025-11-27 (OCS accepts both in practice)
+      time: 0800 (UTC)
+      other_airport: KTEB (Dest for departure, Orig for arrival)
+      parkloc: defaults to SKYCHARTER
+    """
+    owns_session = session is None
+    active_session = session or OCSAutomationSession()
+
+    try:
+        active_session.start(creds)
+        active_session.book_slot(slot)
+    finally:
+        if owns_session:
+            active_session.close()
 
 def main():
     root = tk.Tk()
     root.title("OCS Slot Autofill v1.1")
+
+    session = OCSAutomationSession()
 
     saved_creds = load_saved_creds()
 
@@ -1049,7 +1104,10 @@ def main():
             return
 
         save_creds(creds["username"], creds["password"], creds["passphrase"])
-        run_ocs_autofill(slot, creds)
+        try:
+            run_ocs_autofill(slot, creds, session=session)
+        except Exception as e:
+            messagebox.showerror("OCS Slot Autofill", f"Error booking slot: {e}")
 
     ttk.Label(root, text="OCS Slot Autofill Tool (FEAS-ready)", font=("Segoe UI", 14, "bold")).pack(pady=(10, 5))
 
@@ -1113,8 +1171,12 @@ def main():
 
     btn_frame = ttk.Frame(root)
     btn_frame.pack(fill="x", padx=10, pady=10)
+    def exit_app():
+        session.close()
+        root.destroy()
+
     ttk.Button(btn_frame, text="Launch Autofill", command=launch_autofill).pack(side="left", padx=5)
-    ttk.Button(btn_frame, text="Exit", command=root.destroy).pack(side="left", padx=5)
+    ttk.Button(btn_frame, text="Exit", command=exit_app).pack(side="left", padx=5)
 
     root.mainloop()
 
