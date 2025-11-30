@@ -368,6 +368,22 @@ def select_parkloc(page, value, timeout=8000):
     page.wait_for_timeout(150)
 
 
+def click_send_all(page, timeout=12000):
+    """Click the Send All button and wait for the confirmation view to load."""
+
+    try:
+        button = page.locator("#sendAllBtn").first
+        button.wait_for(state="visible", timeout=timeout)
+        button.scroll_into_view_if_needed()
+        button.click()
+        page.wait_for_load_state("networkidle")
+        log_debug("Clicked Send All button")
+        return True
+    except Exception as e:
+        log_debug(f"[ERROR clicking Send All]: {e}")
+        return False
+
+
 def select_ap_dropdown(page, airport_code):
     try:
         # Locate the A/P label
@@ -932,11 +948,18 @@ def run_ocs_autofill(slot: dict, creds: dict):
         if slot.get("airport") == "CYYZ":
             select_parkloc(page, parkloc)
 
+        # ---------------- SEND ALL ----------------
+        send_clicked = click_send_all(page)
 
+        if send_clicked:
+            sg.popup(
+                "Send All clicked automatically. Review the confirmation page in the browser."
+            )
+        else:
+            sg.popup_error(
+                "Couldn't click Send All automatically. Please click it manually in the browser."
+            )
 
-
-        # ---------------- STOP SHORT OF SEND ALL ----------------
-        sg.popup("Autofill complete.\nReview in browser, then click Send All manually.")
         page.pause()
         browser.close()
 
