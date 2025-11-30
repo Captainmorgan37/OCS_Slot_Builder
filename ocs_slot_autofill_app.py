@@ -882,14 +882,24 @@ class OCSAutomationSession:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)  # give Angular some time
 
+        # Prefer the sidebar/menu control (button/anchor) instead of a loose
+        # text match to avoid strict-mode collisions with the page header.
         try:
-            page.get_by_role("link", name="GA/BA Flights").click(timeout=3000)
+            nav_button = page.locator(
+                "button:has(span:has-text('GA/BA Flights')), "
+                "a:has(span:has-text('GA/BA Flights'))"
+            ).first
+            nav_button.click(timeout=3000)
         except Exception:
-            print("[INFO] Falling back to text locator for GA/BA Flights...")
-            page.get_by_text("GA/BA Flights").click()
+            try:
+                page.get_by_role("link", name="GA/BA Flights").first.click(timeout=3000)
+            except Exception:
+                print("[INFO] Falling back to explicit text locator for GA/BA Flights...")
+                page.locator("button:has-text('GA/BA Flights'), a:has-text('GA/BA Flights')").first.click()
 
-        page.wait_for_selector("text=Add Flights", timeout=8000)
-        page.click("text=Add Flights")
+        # The Add Flights control is also duplicated as a page header; target a
+        # clickable element (button/anchor) to avoid strict mode errors.
+        page.locator("button:has-text('Add Flights'), a:has-text('Add Flights')").first.click()
 
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1500)  # allow Angular to finish animations
@@ -904,8 +914,10 @@ class OCSAutomationSession:
         # If we're not on the Add Flights page anymore, navigate via the UI
         # instead of hitting the route directly (direct deep links can 404
         # when the session hasn't initialized routing state).
+        # If we're already on the slot-entry form, skip re-navigation; otherwise
+        # walk through the sidebar path to avoid deep-link 404s.
         try:
-            if not self.page.get_by_text("Add Flights").is_visible():
+            if not self.page.locator("//p[normalize-space()='Departure']").is_visible():
                 self._nav_to_add_flights()
         except Exception:
             self._nav_to_add_flights()
@@ -962,7 +974,6 @@ class OCSAutomationSession:
                     "OCS Slot Autofill",
                     "Couldn't select A/P dropdown. We'll need to tweak selector.",
                 )
-                page.pause()
 
         if slot.get("acreg"):
             fill_text_cell(page, "A/C Reg", slot["acreg"])
@@ -1004,8 +1015,6 @@ class OCSAutomationSession:
                 "OCS Slot Autofill",
                 "Couldn't click Send All automatically. Please click it manually in the browser.",
             )
-
-        page.pause()
 
     def close(self):
         try:
