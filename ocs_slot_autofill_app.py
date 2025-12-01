@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, simpledialog, ttk
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
@@ -194,8 +195,27 @@ def select_row_react_select(page, row_label, value_text, timeout=6000):
         else:
             raise Exception(f"Dropdown never opened for label '{row_label}'")
 
-        # 6) Pick the option
+        # 6) Pick the option (wait for options to populate when the menu is slow
+        # to load, e.g., the A/P list occasionally rendering only 2 of 4 airports
+        # on initial load).
         option = page.get_by_role("option", name=value_text)
+        if option.count() == 0:
+            menu_options = menu.locator("[role='option']")
+            deadline = time.time() + (timeout / 1000)
+            while time.time() < deadline:
+                if option.count() > 0:
+                    break
+                # If the menu hasn't fully populated (e.g., fewer than four A/P
+                # entries), wait briefly before retrying so the reload path can
+                # kick in when the option truly isn't available.
+                if menu_options.count() < 4:
+                    page.wait_for_timeout(200)
+                else:
+                    break
+
+            if option.count() == 0:
+                raise Exception(f"Option '{value_text}' not available in dropdown")
+
         option.wait_for(timeout=timeout)
         option.click(force=True)
 
@@ -964,57 +984,78 @@ class OCSAutomationSession:
         else:
             raise Exception(f"Unknown operation: {operation}")
 
-        click_add_slot_button(page, opkey)
-        page.wait_for_timeout(800)
+        ap_selected = False
+        max_attempts = 2
 
-        if slot.get("airport"):
-            ok = select_row_react_select(page, "A/P", slot["airport"])
-            if not ok:
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                log_debug(
+                    "A/P selection failed; refreshing page and retrying from Add A/C Reg"
+                )
+                page.reload(wait_until="networkidle")
+                page.wait_for_timeout(1200)
+                self.ensure_add_flights_page()
+
+            click_add_slot_button(page, opkey)
+            page.wait_for_timeout(800)
+
+            ap_selected = True
+            if slot.get("airport"):
+                ap_selected = select_row_react_select(page, "A/P", slot["airport"])
+
+            if not ap_selected:
+                log_debug(
+                    f"A/P option '{slot.get('airport','')}' not available; will refresh and retry"
+                )
+                continue
+
+            if slot.get("acreg"):
+                fill_text_cell(page, "A/C Reg", slot["acreg"])
+
+            if slot.get("date"):
+                fill_text_cell(page, "Date", slot["date"])
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(150)
+
+            if slot.get("seats"):
+                fill_text_cell(page, "Seats", slot["seats"])
+
+            if slot.get("ac_type"):
+                fill_text_cell(page, "A/C Type", slot["ac_type"])
+
+            if slot.get("time"):
+                fill_text_cell(page, "Time", slot["time"])
+
+            if slot.get("other_airport"):
+                if operation == "departure":
+                    fill_text_cell(page, "Dest", slot["other_airport"])
+                else:
+                    fill_text_cell(page, "Orig", slot["other_airport"])
+
+            select_stc(page, "D")
+
+            if slot.get("airport") == "CYYZ":
+                select_parkloc(page, parkloc)
+
+            send_clicked = click_send_all(page)
+
+            if send_clicked:
+                messagebox.showinfo(
+                    "OCS Slot Autofill",
+                    "Send All clicked automatically. Review the confirmation page in the browser.",
+                )
+            else:
                 messagebox.showerror(
                     "OCS Slot Autofill",
-                    "Couldn't select A/P dropdown. We'll need to tweak selector.",
+                    "Couldn't click Send All automatically. Please click it manually in the browser.",
                 )
 
-        if slot.get("acreg"):
-            fill_text_cell(page, "A/C Reg", slot["acreg"])
+            return
 
-        if slot.get("date"):
-            fill_text_cell(page, "Date", slot["date"])
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(150)
-
-        if slot.get("seats"):
-            fill_text_cell(page, "Seats", slot["seats"])
-
-        if slot.get("ac_type"):
-            fill_text_cell(page, "A/C Type", slot["ac_type"])
-
-        if slot.get("time"):
-            fill_text_cell(page, "Time", slot["time"])
-
-        if slot.get("other_airport"):
-            if operation == "departure":
-                fill_text_cell(page, "Dest", slot["other_airport"])
-            else:
-                fill_text_cell(page, "Orig", slot["other_airport"])
-
-        select_stc(page, "D")
-
-        if slot.get("airport") == "CYYZ":
-            select_parkloc(page, parkloc)
-
-        send_clicked = click_send_all(page)
-
-        if send_clicked:
-            messagebox.showinfo(
-                "OCS Slot Autofill",
-                "Send All clicked automatically. Review the confirmation page in the browser.",
-            )
-        else:
-            messagebox.showerror(
-                "OCS Slot Autofill",
-                "Couldn't click Send All automatically. Please click it manually in the browser.",
-            )
+        messagebox.showerror(
+            "OCS Slot Autofill",
+            "Couldn't select A/P dropdown after reloading. We'll need to tweak selector.",
+        )
 
     def close(self):
         try:
