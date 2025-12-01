@@ -4,6 +4,7 @@ import re
 import time
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, simpledialog, ttk
+import random
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 
 # -----------------------------
@@ -955,9 +956,49 @@ class OCSAutomationSession:
         slot["ac_type"] = ac_type
 
         # Default tail registrations when the user leaves A/C Reg blank.
-        default_regs = {"E545": "CGASL", "C25A": "CFASP", "C25B": "CFASY"}
+        default_regs = {
+            "C25A": ["CFASP", "CFASR", "CFASW", "CFIAS", "CGASR", "CGZAS"],
+            "C25B": [
+                "CFASY",
+                "CGAAS",
+                "CGASW",
+                "CFNAS",
+                "CGNAS",
+                "CGFFS",
+                "CFSFS",
+                "CGFSX",
+                "CFSFO",
+                "CFSNP",
+                "CFSQX",
+                "CFSFP",
+                "CFSEF",
+                "CFSDN",
+                "CGFSD",
+                "CFSUP",
+                "CFSRY",
+                "CGFSJ",
+            ],
+            "E545": [
+                "CGASL",
+                "CFASV",
+                "CFLAS",
+                "CFASF",
+                "CFJAS",
+                "CGASE",
+                "CGASK",
+                "CGXAS",
+                "CGBAS",
+                "CFSNY",
+                "CFSYX",
+                "CFSBR",
+                "CFSRX",
+                "CFSJR",
+                "CFASQ",
+                "CFSDO",
+            ],
+        }
         if not slot.get("acreg") and ac_type in default_regs:
-            slot["acreg"] = default_regs[ac_type]
+            slot["acreg"] = random.choice(default_regs[ac_type])
 
         if not slot.get("seats"):
             if ac_type == "E545":
